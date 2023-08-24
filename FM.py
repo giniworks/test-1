@@ -136,7 +136,7 @@ class FactorizationMachine(nn.Module):
     def recommend_top_n_items_for_all_users(self, user_features_list, all_item_features, all_item_ids, top_n=5):
         recommendations = {}
         for i, user_features in enumerate(user_features_list):
-            user_id = i  # or replace with actual user ID if you have that info
+            user_id = i  # can replace with actual user ID if I have
             top_n_items = self.recommend_top_n_items(user_features, all_item_features, all_item_ids, top_n)
             recommendations[user_id] = top_n_items
         return recommendations
