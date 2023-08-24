@@ -2,8 +2,46 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from sklearn.preprocessing import LabelEncoder
-from sklearn.model_selection import train_test_split
+
+
+def generate_not_purchased_data(df):
+    # 실제 빈도수 계산하여 customer_frequency, product_frequency 컬럼 추가
+    df['customer_frequency'] = df.groupby('AUTH_CUSTOMER_ID')['AUTH_CUSTOMER_ID'].transform('count')
+    df['product_frequency'] = df.groupby('PRODUCT_CODE')['PRODUCT_CODE'].transform('count')
+    
+    # 모든 고유한 고객과 제품 정보 추출
+    unique_customers = df['AUTH_CUSTOMER_ID'].unique()
+    unique_products = df['PRODUCT_CODE'].unique()
+    
+    # 빈 리스트 생성
+    not_purchased_products_list = []
+    
+    # 각 고객별로 구매하지 않은 제품 정보 추가
+    for customer in unique_customers:
+        customer_frequency = df[df['AUTH_CUSTOMER_ID'] == customer]['customer_frequency'].iloc[0]
+        purchased_products = df[df['AUTH_CUSTOMER_ID'] == customer]['PRODUCT_CODE'].unique()
+
+        customer_birth_category = df[df['AUTH_CUSTOMER_ID'] == customer]['Birth_Category'].iloc[0]
+        customer_gender_category = df[df['AUTH_CUSTOMER_ID'] == customer]['gender_category'].iloc[0]
+        
+        not_purchased_products = [product for product in unique_products if product not in purchased_products]
+        
+        not_purchased_products_data = [{'AUTH_CUSTOMER_ID': customer, 
+                                        'PRODUCT_CODE': product,
+                                        'Birth_Category': customer_birth_category,
+                                        'gender_category': customer_gender_category,
+                                        'customer_frequency': customer_frequency,
+                                        'product_frequency': df[df['PRODUCT_CODE'] == product]['product_frequency'].iloc[0]} 
+                                       for product in not_purchased_products]
+        
+        not_purchased_products_list.extend(not_purchased_products_data)
+    
+    # 새로운 데이터프레임 생성
+    not_purchased_df = pd.DataFrame(not_purchased_products_list)
+    not_purchased_df['target'] = 0
+    
+    return not_purchased_df
+
 
 class FactorizationMachine(nn.Module):
     def __init__(self, num_features, num_factors, lr=0.01, weight_decay=0.01):
