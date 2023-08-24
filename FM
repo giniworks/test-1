@@ -1,0 +1,93 @@
+import pandas as pd
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import train_test_split
+
+class FactorizationMachine(nn.Module):
+    def __init__(self, num_features, num_factors, lr=0.01, weight_decay=0.01):
+        super(FactorizationMachine, self).__init__()
+        self.num_features = num_features
+        self.num_factors = num_factors
+        self.w = nn.Parameter(torch.randn(num_features))
+        self.v = nn.Parameter(torch.randn(num_features, num_factors))
+        self.optimizer = optim.SGD(self.parameters(), lr=lr, weight_decay=weight_decay)
+        self.loss_func = nn.BCEWithLogitsLoss()
+
+    def forward(self, x):
+        linear_terms = torch.matmul(x, self.w)
+        interactions = 0.5 * torch.sum(
+            torch.matmul(x, self.v) ** 2 - torch.matmul(x ** 2, self.v ** 2),
+            dim=1,
+            keepdim=True
+        )
+        return linear_terms + interactions.squeeze()
+
+    def loss(self, y_pred, y_true):
+        return self.loss_func(y_pred, y_true.float())
+
+    def train_step(self, x, y):
+        self.optimizer.zero_grad()
+        y_pred = self.forward(x)
+        loss = self.loss(y_pred, y)
+        loss.backward()
+        self.optimizer.step()
+        return loss.item()
+
+    def recommend_top_n_items(self, user_features, all_item_features, all_item_ids, top_n=5):
+        combined_features = torch.cat([user_features.expand(all_item_features.shape[0], -1), all_item_features], dim=1)
+        with torch.no_grad():
+            scores = self.forward(combined_features)
+        sorted_indices = torch.argsort(scores, descending=True)[:top_n]
+        return [all_item_ids[i] for i in sorted_indices]
+
+    def recommend_top_n_items_for_all_users(self, user_features_list, all_item_features, all_item_ids, top_n=5):
+        recommendations = {}
+        for i, user_features in enumerate(user_features_list):
+            user_id = i  # or replace with actual user ID if you have that info
+            top_n_items = self.recommend_top_n_items(user_features, all_item_features, all_item_ids, top_n)
+            recommendations[user_id] = top_n_items
+        return recommendations
+
+# Preprocessing
+target_col = 'target'
+#df, label_encoders = process_dataframe(df, target_col)
+X = df.drop(columns=[target_col,'PRODUCT_CODE','C','AUTH_CUSTOMER_ID'])
+y = df[target_col]
+num_epochs = 10
+X_tensor = torch.tensor(X.values, dtype=torch.float32)
+y_tensor = torch.tensor(y.values, dtype=torch.float32).view(-1)
+
+
+# User features
+unique_user_df = df.drop_duplicates(subset=['AUTH_CUSTOMER_ID']).sort_values('AUTH_CUSTOMER_ID')
+user_features_df = unique_user_df[['Birth_Category', 'gender_category']]
+user_feature_tensor = torch.tensor(pd.get_dummies(user_features_df).values, dtype=torch.float32)
+
+# Item features
+unique_item_df = df.drop_duplicates(subset=['PRODUCT_CODE']).sort_values('PRODUCT_CODE')
+item_features_df = unique_item_df.filter(like='DEPTH')
+item_feature_tensor = torch.tensor(item_features_df.values, dtype=torch.float32)
+
+
+# item_ids
+all_item_ids = list(df.PRODUCT_CODE.unique())
+
+# Initialize model
+num_features = X.shape[1] 
+#num_features = user_feature_tensor.shape[1] + item_feature_tensor.shape[1]
+num_factors = 3
+model = FactorizationMachine(num_features, num_factors)
+
+
+# # Dummy Training loop
+
+
+for epoch in range(num_epochs):
+    loss = model.train_step(X_tensor, y_tensor)
+    print(f'Epoch {epoch+1}/{num_epochs}, Loss: {loss:.4f}')
+
+# Make recommendations
+recommendations = model.recommend_top_n_items_for_all_users(user_feature_tensor, item_feature_tensor, all_item_ids, top_n=5)
+print("User-wise top 5 recommended items:", recommendations)
