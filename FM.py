@@ -3,30 +3,41 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-
-def generate_not_purchased_data(df):
-    # 실제 빈도수 계산하여 customer_frequency, product_frequency 컬럼 추가
-    df['customer_frequency'] = df.groupby('AUTH_CUSTOMER_ID')['AUTH_CUSTOMER_ID'].transform('count')
-    df['product_frequency'] = df.groupby('PRODUCT_CODE')['PRODUCT_CODE'].transform('count')
-    
-    # 모든 고유한 고객과 제품 정보 추출
-    unique_customers = df['AUTH_CUSTOMER_ID'].unique()
-    unique_products = df['PRODUCT_CODE'].unique()
-    
-    # 빈 리스트 생성
-    not_purchased_products_list = []
-    
-    # 각 고객별로 구매하지 않은 제품 정보 추가
-    for customer in unique_customers:
-        customer_frequency = df[df['AUTH_CUSTOMER_ID'] == customer]['customer_frequency'].iloc[0]
-        purchased_products = df[df['AUTH_CUSTOMER_ID'] == customer]['PRODUCT_CODE'].unique()
-
-        customer_birth_category = df[df['AUTH_CUSTOMER_ID'] == customer]['Birth_Category'].iloc[0]
-        customer_gender_category = df[df['AUTH_CUSTOMER_ID'] == customer]['gender_category'].iloc[0]
+class FM_Preprocessing:
+    def __init__(self, df, target_col='target', num_epochs=10):
+        self.df = df
+        self.target_col = target_col
+        self.num_epochs = num_epochs
+        self.X_tensor, self.y_tensor, self.c_values_tensor, self.user_feature_tensor, self.item_feature_tensor, self.all_item_ids, self.num_features = self.prepare_data()
+        if not isinstance(df, pd.DataFrame):
+            raise ValueError("The df parameter should be a pandas DataFrame.")
         
-        not_purchased_products = [product for product in unique_products if product not in purchased_products]
+        if target_col not in df.columns:
+            raise ValueError(f"The target column {target_col} is not in the DataFrame.")
+
+    def generate_not_purchased_data(df):
+        customer_frequency, product_frequency 컬럼 추가
+        df['customer_frequency'] = df.groupby('AUTH_CUSTOMER_ID')['AUTH_CUSTOMER_ID'].transform('count')
+        df['product_frequency'] = df.groupby('PRODUCT_CODE')['PRODUCT_CODE'].transform('count')
+    
         
-        not_purchased_products_data = [{'AUTH_CUSTOMER_ID': customer, 
+        unique_customers = df['AUTH_CUSTOMER_ID'].unique()
+        unique_products = df['PRODUCT_CODE'].unique()
+    
+        
+        not_purchased_products_list = []
+    
+        
+        for customer in unique_customers:
+            customer_frequency = df[df['AUTH_CUSTOMER_ID'] == customer]['customer_frequency'].iloc[0]
+            purchased_products = df[df['AUTH_CUSTOMER_ID'] == customer]['PRODUCT_CODE'].unique()
+
+            customer_birth_category = df[df['AUTH_CUSTOMER_ID'] == customer]['Birth_Category'].iloc[0]
+            customer_gender_category = df[df['AUTH_CUSTOMER_ID'] == customer]['gender_category'].iloc[0]
+        
+            not_purchased_products = [product for product in unique_products if product not in purchased_products]
+        
+            not_purchased_products_data = [{'AUTH_CUSTOMER_ID': customer, 
                                         'PRODUCT_CODE': product,
                                         'Birth_Category': customer_birth_category,
                                         'gender_category': customer_gender_category,
@@ -34,13 +45,50 @@ def generate_not_purchased_data(df):
                                         'product_frequency': df[df['PRODUCT_CODE'] == product]['product_frequency'].iloc[0]} 
                                        for product in not_purchased_products]
         
-        not_purchased_products_list.extend(not_purchased_products_data)
+            not_purchased_products_list.extend(not_purchased_products_data)
     
-    # 새로운 데이터프레임 생성
-    not_purchased_df = pd.DataFrame(not_purchased_products_list)
-    not_purchased_df['target'] = 0
     
-    return not_purchased_df
+        not_purchased_df = pd.DataFrame(not_purchased_products_list)
+        not_purchased_df['target'] = 0
+    
+        return not_purchased_df
+
+    def prepare_data(self):
+        X = self.df.drop(columns=[self.target_col, 'PRODUCT_CODE', 'C', 'AUTH_CUSTOMER_ID'])
+        y = self.df[self.target_col]
+        c = self.df['C']
+        
+        X_tensor = torch.tensor(X.values, dtype=torch.float32)
+        y_tensor = torch.tensor(y.values, dtype=torch.float32).view(-1)
+
+        c_values_tensor = torch.tensor(c, dtype=torch.float32)
+        c_values_tensor = torch.where(c_values_tensor < 1, c_values_tensor * 100, c_values_tensor)
+
+        unique_user_df = self.df.drop_duplicates(subset=['AUTH_CUSTOMER_ID']).sort_values('AUTH_CUSTOMER_ID')
+        user_features_df = unique_user_df[['Birth_Category', 'gender_category']]
+        user_feature_tensor = torch.tensor(pd.get_dummies(user_features_df).values, dtype=torch.float32)
+
+        unique_item_df = self.df.drop_duplicates(subset=['PRODUCT_CODE']).sort_values('PRODUCT_CODE')
+        item_features_df = unique_item_df.filter(like='DEPTH')
+        item_feature_tensor = torch.tensor(item_features_df.values, dtype=torch.float32)
+
+        all_item_ids = list(self.df.PRODUCT_CODE.unique())
+
+        num_features = X.shape[1]
+        
+        return X_tensor, y_tensor, c_values_tensor, user_feature_tensor, item_feature_tensor, all_item_ids, num_features
+
+if __name__ == '__main__':
+    
+    try:
+        df = pd.read_csv('your_data.csv')
+        preprocess = FM_Preprocessing(df)
+        not_purchased_df = preprocess.generate_not_purchased_data()
+        # ...
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        
+
 
 
 class FactorizationMachine(nn.Module):
@@ -93,48 +141,12 @@ class FactorizationMachine(nn.Module):
             recommendations[user_id] = top_n_items
         return recommendations
 
-# Preprocessing
-target_col = 'target'
-#df, label_encoders = process_dataframe(df, target_col)
-X = df.drop(columns=[target_col,'PRODUCT_CODE','C','AUTH_CUSTOMER_ID'])
-y = df[target_col]
-c = df['C']
-num_epochs = 10
-X_tensor = torch.tensor(X.values, dtype=torch.float32)
-y_tensor = torch.tensor(y.values, dtype=torch.float32).view(-1)
-
-c_values_tensor = torch.tensor(c, dtype=torch.float32)
-c_values_tensor = torch.where(c_values_tensor < 1, c_values_tensor * 100, c_values_tensor)
 
 
-# User features
-unique_user_df = df.drop_duplicates(subset=['AUTH_CUSTOMER_ID']).sort_values('AUTH_CUSTOMER_ID')
-user_features_df = unique_user_df[['Birth_Category', 'gender_category']]
-user_feature_tensor = torch.tensor(pd.get_dummies(user_features_df).values, dtype=torch.float32)
+# for epoch in range(num_epochs):
+#     loss = model.train_step(X_tensor, y_tensor,c_values_tensor)
+#     print(f'Epoch {epoch+1}/{num_epochs}, Loss: {loss:.4f}')
 
-# Item features
-unique_item_df = df.drop_duplicates(subset=['PRODUCT_CODE']).sort_values('PRODUCT_CODE')
-item_features_df = unique_item_df.filter(like='DEPTH')
-item_feature_tensor = torch.tensor(item_features_df.values, dtype=torch.float32)
-
-
-# item_ids
-all_item_ids = list(df.PRODUCT_CODE.unique())
-
-# Initialize model
-num_features = X.shape[1] 
-#num_features = user_feature_tensor.shape[1] + item_feature_tensor.shape[1]
-num_factors = 3
-model = FactorizationMachine(num_features, num_factors)
-
-
-# # Dummy Training loop
-
-
-for epoch in range(num_epochs):
-    loss = model.train_step(X_tensor, y_tensor,c_values_tensor)
-    print(f'Epoch {epoch+1}/{num_epochs}, Loss: {loss:.4f}')
-
-# Make recommendations
-recommendations = model.recommend_top_n_items_for_all_users(user_feature_tensor, item_feature_tensor, all_item_ids, top_n=5)
-print("User-wise top 5 recommended items:", recommendations)
+# # Make recommendations
+# recommendations = model.recommend_top_n_items_for_all_users(user_feature_tensor, item_feature_tensor, all_item_ids, top_n=5)
+# print("User-wise top 5 recommended items:", recommendations)
