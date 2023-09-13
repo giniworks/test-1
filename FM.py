@@ -50,8 +50,11 @@ class FM_Preprocessing:
     
         not_purchased_df = pd.DataFrame(not_purchased_products_list)
         not_purchased_df['target'] = 0
+        not_purchased_df['total_frequency'] = not_purchased_df['customer_frequency'] * not_purchased_df['product_frequency']
+        # 'product_frequency' 값을 기반으로 샘플링
+        sampled_products = not_purchased_df.sample(n=len(df), weights='total_frequency', replace=True)
     
-        return not_purchased_df
+        return not_purchased_df, sampled_products
 
     def prepare_data(self):
         X = self.df.drop(columns=[self.target_col, 'PRODUCT_CODE', 'C', 'AUTH_CUSTOMER_ID'])
